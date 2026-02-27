@@ -31,31 +31,17 @@ TOP_P = 1.0
 TOP_K = 5
 
 # prompt
-# TEXT_1="""
-# You are an autonomous driving planner.
-# Coordinate system: X-axis is lateral, Y-axis is longitudinal.
-# The ego vehicle is at (0,0), units are meters.
-# Based on the provided front-view image and driving context, plan future waypoints at 0.5-second intervals for the next 3 seconds.
-
-# Here is the front-view image from the car:
-# """
-
 TEXT_1="""
 You are an autonomous driving planner.
-Coordinate system: 
-Coordinate system: Vehicle at (0,0). X=right(+)/left(-), Y=forward(+).
-For straight driving, keep X ≈ 0.
+Coordinate system: X-axis is lateral, Y-axis is longitudinal.
 The ego vehicle is at (0,0), units are meters.
-Keep the vehicle in the center of the lane. X coordinate should be close to 0 for straight driving.
-
 Based on the provided front-view image and driving context, plan future waypoints at 0.5-second intervals for the next 3 seconds.
 
 Here is the front-view image from the car:
 """
 
-
 TEXT_2="""
-Mission goal: FORWARD
+Mission goal: TURN LEFT
 Traffic rules:
 - Avoid collision with other objects.
 - Always drive on drivable regions.

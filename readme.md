@@ -19,4 +19,3 @@ pkill -f car &&
 pkill -f all_launcher &&
 pkill -f mpc_planner &&
 ros2 node list
-

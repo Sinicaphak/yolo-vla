@@ -17,7 +17,7 @@ class SimpleSimulator(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('publish_rate', 50.0)
         self.declare_parameter('cmd_timeout', 0.5)
-        self.declare_parameter('initial_pose', [0.0, 0.0, 1.57])
+        self.declare_parameter('initial_pose', [1.0, 0.0, 1.57])
         self.declare_parameter('enable_tf', True)
 
         init_pose: List[float] = list(self.get_parameter('initial_pose').value)

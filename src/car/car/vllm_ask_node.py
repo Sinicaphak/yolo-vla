@@ -187,7 +187,7 @@ class VllmAskNode(Node):
             
             # 模型生成的是左手坐标系, ros2里用的是右手坐标系, 换一下xy位置
             p.x = float(y_str)
-            p.y = float(x_str)
+            p.y = -float(x_str)
             p.z = 0.0
             points.append(p)
         return points
