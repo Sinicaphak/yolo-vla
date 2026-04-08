@@ -36,6 +36,7 @@ class RecvPromptNode(Node):
         self.declare_parameter("raw_image_topic", "/car/pic")
         self.declare_parameter("camera_mode", "")
         self.declare_parameter("text_topic", "/car/model_text")
+        self.declare_parameter("qwen_result_topic", "/car/qwen_result")
         self.declare_parameter("waypoint_topic", "/goal_point")
         self.declare_parameter("prompt_complete_topic", "/car/prompt_complete")  # 新增
         self.declare_parameter("prompt_dispatch_mode", "repeat_1hz")
@@ -47,6 +48,7 @@ class RecvPromptNode(Node):
         self.raw_image_topic = self.get_parameter("raw_image_topic").get_parameter_value().string_value
         self.camera_mode = self.get_parameter("camera_mode").get_parameter_value().string_value
         self.text_topic = self.get_parameter("text_topic").get_parameter_value().string_value
+        self.qwen_result_topic = self.get_parameter("qwen_result_topic").get_parameter_value().string_value
         self.waypoint_topic = self.get_parameter("waypoint_topic").get_parameter_value().string_value
         self.prompt_complete_topic = self.get_parameter("prompt_complete_topic").get_parameter_value().string_value  # 新增
         raw_dispatch_mode = (
@@ -71,6 +73,7 @@ class RecvPromptNode(Node):
         self.create_subscription(Image, self.image_topic, self.on_image, qos)
         self.create_subscription(Image, self.raw_image_topic, self.on_raw_image, raw_qos)
         self.create_subscription(String, self.text_topic, self.on_text, qos)
+        self.create_subscription(String, self.qwen_result_topic, self.on_qwen_result, qos)
         self.create_subscription(PoseArray, self.waypoint_topic, self.on_waypoints, qos)
         self.create_subscription(String, self.prompt_complete_topic, self.on_prompt_complete, qos)
 
@@ -82,6 +85,14 @@ class RecvPromptNode(Node):
         self._latest_raw_image_b64 = ""
         self._latest_raw_frame_id = ""
         self._latest_text = ""
+        self._latest_qwen_result: Dict[str, Any] = {
+            "request_id": "",
+            "qwen_complex": None,
+            "qwen_confidence": None,
+            "qwen_error": "",
+            "qwen_answer": "",
+            "qwen_scene_summary": "",
+        }
         self._latest_waypoints: List[Dict[str, float]] = []
         self._current_prompt_processing = False
         self._current_prompt_uuid: Optional[str] = None  # 新增：当前处理的 UUID
@@ -159,6 +170,7 @@ class RecvPromptNode(Node):
                     "raw_image_topic": self.raw_image_topic,
                     "raw_image_jpeg_b64": self._latest_raw_image_b64,
                     "waypoints": self._latest_waypoints,
+                    "qwen_result": self._latest_qwen_result,
                     "prompt_processing": self._current_prompt_processing,
                     "prompt_uuid": self._current_prompt_uuid,  # 新增
                     "prompt_complete_time": self._last_prompt_complete_time,
@@ -173,6 +185,14 @@ class RecvPromptNode(Node):
                     "ok": True,
                     "frame_id": self._latest_raw_frame_id,
                     "image_jpeg_b64": self._latest_raw_image_b64,
+                }
+
+        @app.get("/api/qwen_result")
+        def get_qwen_result():
+            with self._lock:
+                return {
+                    "ok": True,
+                    "qwen_result": self._latest_qwen_result,
                 }
 
         # 可选：专门的状态端点
@@ -302,6 +322,31 @@ class RecvPromptNode(Node):
     def on_text(self, msg: String):
         with self._lock:
             self._latest_text = msg.data
+
+    def on_qwen_result(self, msg: String):
+        try:
+            data = json.loads(msg.data)
+            if not isinstance(data, dict):
+                return
+        except Exception:
+            data = {
+                "request_id": "",
+                "qwen_complex": None,
+                "qwen_confidence": None,
+                "qwen_error": "invalid_json",
+                "qwen_answer": msg.data,
+                "qwen_scene_summary": "",
+            }
+
+        with self._lock:
+            self._latest_qwen_result = {
+                "request_id": data.get("request_id", ""),
+                "qwen_complex": data.get("qwen_complex"),
+                "qwen_confidence": data.get("qwen_confidence"),
+                "qwen_error": data.get("qwen_error", ""),
+                "qwen_answer": data.get("qwen_answer", ""),
+                "qwen_scene_summary": data.get("qwen_scene_summary", ""),
+            }
 
     def on_waypoints(self, msg: PoseArray):
         points = []

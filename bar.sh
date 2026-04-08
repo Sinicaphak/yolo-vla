@@ -98,7 +98,7 @@ launch_system() {
 
 start_ssh_tunnel_terminal() {
   local ssh_cmd="ssh -p 28853 -N -L 8000:localhost:8000 root@connect.cqa1.seetacloud.com"
-
+  # 5HsiihfiMZeB
   # 必须有图形会话才能开“新终端窗口”
   if [ -z "${DISPLAY:-}" ]; then
     echo "[ERROR] 未检测到图形桌面（DISPLAY 为空），无法打开新终端窗口。"
@@ -128,6 +128,7 @@ main() {
   check_can_data
   clean_build_artifacts
   build_workspace
+  # start_ssh_tunnel_terminal
   launch_system
 }
 

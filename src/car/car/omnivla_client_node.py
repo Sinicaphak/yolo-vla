@@ -50,6 +50,7 @@ class OmniVLAClientNode(Node):
         self.declare_parameter('goal_lat', 0.0)
         self.declare_parameter('goal_lon', 0.0)
         self.declare_parameter('goal_compass', 0.0)
+        self.declare_parameter('auto_start_prompt', 'go forward')  # 自动启动的默认 prompt
 
         # 获取参数值
         self.pic_topic = self.get_parameter('pic_topic').get_parameter_value().string_value
@@ -68,6 +69,8 @@ class OmniVLAClientNode(Node):
         self.goal_lat = self.get_parameter('goal_lat').get_parameter_value().double_value
         self.goal_lon = self.get_parameter('goal_lon').get_parameter_value().double_value
         self.goal_compass = self.get_parameter('goal_compass').get_parameter_value().double_value
+        self.auto_start_prompt = self.get_parameter('auto_start_prompt').get_parameter_value().string_value
+        self._auto_start_mode = bool(self.auto_start_prompt)
 
         self.get_logger().info(f"服务器地址: {self.server_url}")
         # self.get_logger().info(f"请求超时: {self.request_timeout}s")
@@ -77,6 +80,13 @@ class OmniVLAClientNode(Node):
         self.active_prompt = False
         self.current_prompt_uuid: Optional[str] = None
 
+        # 自动启动推理（如果设置了 auto_start_prompt）
+        if self.auto_start_prompt:
+            self.language_prompt = self.auto_start_prompt
+            self.current_prompt_uuid = "auto_start_" + str(time.time_ns() // 1_000_000)
+            self.active_prompt = True
+            self.get_logger().info(f"自动启动推理，prompt: '{self.auto_start_prompt}'")
+
         # 性能统计
         self.total_duration = 0.0
         self.request_count = 0
@@ -85,7 +95,6 @@ class OmniVLAClientNode(Node):
 
         # 创建发布者和订阅者
         self.waypoints_publisher = self.create_publisher(PoseArray, self.commd_topic, 10)
-        self.processed_image_publisher = self.create_publisher(Image, self.process_pic_topic, 10)
         self.prompt_complete_pub = self.create_publisher(String, "/car/prompt_complete", 10)
 
         # 订阅图像话题
@@ -188,10 +197,6 @@ class OmniVLAClientNode(Node):
             # 1. 转换 ROS 图像
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
 
-            # 调整图像大小
-            if self.img_width > 0 and self.img_height > 0:
-                cv_image = cv2.resize(cv_image, (self.img_width, self.img_height))
-
             # 2. 编码为 base64
             image_base64 = self.encode_image_to_base64(cv_image)
 
@@ -207,10 +212,7 @@ class OmniVLAClientNode(Node):
 
                 # 发布路径点
                 if waypoints:
-                    self.publish_waypoints(waypoints)
-
-                # 发布处理后的图像
-                self.publish_processed_image(cv_image)
+                    self.publish_waypoints(waypoints, msg.header.frame_id)
 
                 # 检查 prompt 是否已被中断
                 if current_uuid == self.current_prompt_uuid:
@@ -218,8 +220,10 @@ class OmniVLAClientNode(Node):
                     complete_data = json.dumps({"uuid": current_uuid, "status": "completed"})
                     complete_msg.data = complete_data
                     self.prompt_complete_pub.publish(complete_msg)
-                    self.active_prompt = False
-                    self.current_prompt_uuid = None
+                    # 自动启动模式下保持活跃，持续处理后续图像
+                    if not self._auto_start_mode:
+                        self.active_prompt = False
+                        self.current_prompt_uuid = None
 
                 # 性能统计
                 duration = time.time() - start_time
@@ -313,11 +317,11 @@ class OmniVLAClientNode(Node):
 
         return None
 
-    def publish_waypoints(self, waypoints: list):
+    def publish_waypoints(self, waypoints: list, request_id: str = ""):
         """发布路径点"""
         pose_array = PoseArray()
         pose_array.header.stamp = self.get_clock().now().to_msg()
-        pose_array.header.frame_id = "base_link"
+        pose_array.header.frame_id = request_id if request_id else "base_link"
 
         for i, wp in enumerate(waypoints):
             # waypoints 格式: [dx, dy, hx, hy]
@@ -335,17 +339,6 @@ class OmniVLAClientNode(Node):
 
         self.waypoints_publisher.publish(pose_array)
 
-    def publish_processed_image(self, cv_image):
-        """发布处理后的图像"""
-        try:
-            ros_image = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
-            ros_image.header.stamp = self.get_clock().now().to_msg()
-            ros_image.header.frame_id = "omnivla_processed"
-            self.processed_image_publisher.publish(ros_image)
-        except Exception as e:
-            self.get_logger().warn(f"发布处理图像失败: {e}")
-
-
 def main(args=None):
     rclpy.init(args=args)
     node = OmniVLAClientNode()
@@ -360,3 +353,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+    

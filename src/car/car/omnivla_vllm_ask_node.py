@@ -125,7 +125,6 @@ class OmniVLANode(Node):
         
         # 创建发布者和订阅者（使用正确的参数名称）
         self.waypoints_publisher = self.create_publisher(PoseArray, self.commd_topic, 10)
-        self.processed_image_publisher = self.create_publisher(Image, self.process_pic_topic, 10)
         self.image_subscription = self.create_subscription(
             Image,
             self.pic_topic,
@@ -258,10 +257,6 @@ class OmniVLANode(Node):
             # 1. 转换 ROS 图像为 PIL 图像
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             
-            # 调整图像大小以匹配参数
-            if self.img_width > 0 and self.img_hight > 0:
-                cv_image = cv2.resize(cv_image, (self.img_width, self.img_hight))
-            
             pil_image = PILImage.fromarray(cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB))
             
             # 2. 运行 OmniVLA 推理
@@ -269,12 +264,9 @@ class OmniVLANode(Node):
             
             # 3. 发布路径点
             if waypoints is not None:
-                self.publish_waypoints(waypoints)
+                self.publish_waypoints(waypoints, msg.header.frame_id)
             
-            # 4. 发布处理后的图像（可选）
-            self.publish_processed_image(cv_image)
-            
-            # 检查 prompt 是否已被中断
+            # 4. 检查 prompt 是否已被中断
             if current_uuid == self.current_prompt_uuid:
                 # 仍然是同一个 prompt，发布完成信号
                 complete_msg = String()
@@ -475,7 +467,7 @@ class OmniVLANode(Node):
             angle += 2 * math.pi
         return angle
     
-    def publish_waypoints(self, waypoints):
+    def publish_waypoints(self, waypoints, request_id=""):
         self.get_logger().debug(f"=== 发布路径点 ===")
         for i, wp in enumerate(waypoints):
             dx, dy, _, _ = wp
@@ -488,7 +480,7 @@ class OmniVLANode(Node):
         """发布路径点作为 PoseArray"""
         pose_array = PoseArray()
         pose_array.header.stamp = self.get_clock().now().to_msg()
-        pose_array.header.frame_id = "base_link"  # 相对于机器人基座标系
+        pose_array.header.frame_id = request_id if request_id else "base_link"  # 相对于机器人基座标系
         
         # 提取前两个维度作为位置（dx, dy）
         for i in range(len(waypoints)):
@@ -513,18 +505,6 @@ class OmniVLANode(Node):
         
         self.waypoints_publisher.publish(pose_array)
     
-    def publish_processed_image(self, cv_image):
-        """发布处理后的图像（可选）"""
-        try:
-            # 可以在这里添加图像处理逻辑
-            ros_image = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
-            ros_image.header.stamp = self.get_clock().now().to_msg()
-            ros_image.header.frame_id = "omnivla_processed"
-            self.processed_image_publisher.publish(ros_image)
-        except Exception as e:
-            self.get_logger().warn(f"发布处理图像失败: {str(e)}")
-        
-
 def main(args=None):
     rclpy.init(args=args)
     omnivla_node = OmniVLANode()

@@ -6,7 +6,7 @@ import os
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 
-is_sim = False
+is_sim = True
 
 def generate_launch_description():
     vllm_and_camera_log_level_arg = DeclareLaunchArgument('vllm_and_camera_log_level', default_value='info')

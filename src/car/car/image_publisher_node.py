@@ -17,14 +17,18 @@ class ImagePublisherNode(Node):
         # 模式：local 或 camera
         self.declare_parameter('mode', 'local')
         self.declare_parameter('pic_topic', '/car/pic')
+        self.declare_parameter('process_pic_topic', '/car/process_pic')
         self.declare_parameter('fps', 30)
         self.declare_parameter('pic_dir', '/home/apollo/disk/ros2/src/car/pic/0')
         self.declare_parameter('camera_device', ['/dev/video114514'])
         self.declare_parameter('frame_width', 0)
         self.declare_parameter('frame_height', 0)
+        self.declare_parameter('process_width', 1280)
+        self.declare_parameter('process_height', 960)
 
         self.mode = self.get_parameter('mode').get_parameter_value().string_value
         self.pic_topic = self.get_parameter('pic_topic').get_parameter_value().string_value
+        self.process_pic_topic = self.get_parameter('process_pic_topic').get_parameter_value().string_value
         self.fps = self.get_parameter('fps').get_parameter_value().integer_value
         self.pic_dir = self.get_parameter('pic_dir').get_parameter_value().string_value
         camera_devices_param = self.get_parameter('camera_device').get_parameter_value().string_array_value
@@ -32,8 +36,11 @@ class ImagePublisherNode(Node):
         self.camera_device = ''  # 实际选中的设备
         self.frame_width = self.get_parameter('frame_width').get_parameter_value().integer_value
         self.frame_height = self.get_parameter('frame_height').get_parameter_value().integer_value
+        self.process_width = self.get_parameter('process_width').get_parameter_value().integer_value
+        self.process_height = self.get_parameter('process_height').get_parameter_value().integer_value
 
         self.publisher_ = self.create_publisher(Image, self.pic_topic, 10)
+        self.process_publisher_ = self.create_publisher(Image, self.process_pic_topic, 10)
         timer_period = 1.0 / self.fps
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
@@ -139,11 +146,24 @@ class ImagePublisherNode(Node):
         if not self.cv_images:
             self.get_logger().error("没有成功加载任何图片。")
             
+    def _preprocess_for_model(self, cv_image):
+        if self.process_width > 0 and self.process_height > 0:
+            return cv2.resize(cv_image, (self.process_width, self.process_height))
+        return cv_image
+
     def publish_frame(self, cv_image, frame_id):
-        ros_image = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
-        ros_image.header.stamp = self.get_clock().now().to_msg()
-        ros_image.header.frame_id = frame_id
-        self.publisher_.publish(ros_image)
+        stamp = self.get_clock().now().to_msg()
+
+        raw_image = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
+        raw_image.header.stamp = stamp
+        raw_image.header.frame_id = frame_id
+        self.publisher_.publish(raw_image)
+
+        processed_cv = self._preprocess_for_model(cv_image)
+        processed_image = self.bridge.cv2_to_imgmsg(processed_cv, "bgr8")
+        processed_image.header.stamp = stamp
+        processed_image.header.frame_id = frame_id
+        self.process_publisher_.publish(processed_image)
 
     def timer_callback(self):
         if not self.model_ready:
@@ -181,8 +201,11 @@ class ImagePublisherNode(Node):
                 self.get_logger().warn('尚未收到 /camera/color/image_raw', throttle_duration_sec=5)
                 return
             msg = self.latest_camera_msg
-            msg.header.stamp = self.get_clock().now().to_msg()
-            self.publisher_.publish(msg)
+            try:
+                cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+                self.publish_frame(cv_image, msg.header.frame_id if msg.header.frame_id else 'camera_frame')
+            except Exception as exc:
+                self.get_logger().warn(f'双目图像转换失败: {exc}', throttle_duration_sec=5)
                 
     def destroy_node(self):
         if self.cap is not None and self.cap.isOpened():
