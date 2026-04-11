@@ -81,11 +81,11 @@ class OmniVLAClientNode(Node):
         self.current_prompt_uuid: Optional[str] = None
 
         # 自动启动推理（如果设置了 auto_start_prompt）
-        if self.auto_start_prompt:
-            self.language_prompt = self.auto_start_prompt
-            self.current_prompt_uuid = "auto_start_" + str(time.time_ns() // 1_000_000)
-            self.active_prompt = True
-            self.get_logger().info(f"自动启动推理，prompt: '{self.auto_start_prompt}'")
+        # if self.auto_start_prompt:
+        #     self.language_prompt = self.auto_start_prompt
+        #     self.current_prompt_uuid = "auto_start_" + str(time.time_ns() // 1_000_000)
+        #     self.active_prompt = True
+        #     self.get_logger().info(f"自动启动推理，prompt: '{self.auto_start_prompt}'")
 
         # 性能统计
         self.total_duration = 0.0

@@ -41,6 +41,7 @@ class VLMComplexityRouterNode(Node):
     def __init__(self):
         super().__init__("vlm_complexity_router")
 
+        self.declare_parameter("prompt_topic", "/car/prompt")
         self.declare_parameter("process_pic_topic", "/car/process_pic")
         self.declare_parameter("simple_waypoint_topic", "/goal_point_simple")
         self.declare_parameter("complex_waypoint_topic", "/goal_point_complex")
@@ -49,10 +50,12 @@ class VLMComplexityRouterNode(Node):
         self.declare_parameter("qwen_result_topic", "/car/qwen_result")
         self.declare_parameter("qwen_api_url", "http://localhost:8002/v1/chat/completions")
         self.declare_parameter("qwen_timeout", 10.0)
+        self.declare_parameter("qwen_min_interval_sec", 5.0)
         self.declare_parameter("compression_quality", 30)
         self.declare_parameter("max_pending_frames", 2)
         self.declare_parameter("request_ttl", 20.0)
 
+        self.prompt_topic = self.get_parameter("prompt_topic").get_parameter_value().string_value
         self.process_pic_topic = self.get_parameter("process_pic_topic").get_parameter_value().string_value
         self.simple_waypoint_topic = self.get_parameter("simple_waypoint_topic").get_parameter_value().string_value
         self.complex_waypoint_topic = self.get_parameter("complex_waypoint_topic").get_parameter_value().string_value
@@ -61,6 +64,7 @@ class VLMComplexityRouterNode(Node):
         self.qwen_result_topic = self.get_parameter("qwen_result_topic").get_parameter_value().string_value
         self.qwen_api_url = self.get_parameter("qwen_api_url").get_parameter_value().string_value
         self.qwen_timeout = self.get_parameter("qwen_timeout").get_parameter_value().double_value
+        self.qwen_min_interval_sec = self.get_parameter("qwen_min_interval_sec").get_parameter_value().double_value
         self.compression_quality = self.get_parameter("compression_quality").get_parameter_value().integer_value
         self.max_pending_frames = self.get_parameter("max_pending_frames").get_parameter_value().integer_value
         self.request_ttl = self.get_parameter("request_ttl").get_parameter_value().double_value
@@ -70,11 +74,19 @@ class VLMComplexityRouterNode(Node):
         self._seq = 0
         self._lock = threading.Lock()
         self._requests: Dict[str, RequestState] = {}
+        self._pending_prompt_tokens = 0
+        self._last_qwen_dispatch_at = 0.0
 
         self.output_waypoint_pub = self.create_publisher(PoseArray, self.output_waypoint_topic, 10)
         self.output_text_pub = self.create_publisher(String, self.output_text_topic, 10)
         self.qwen_result_pub = self.create_publisher(String, self.qwen_result_topic, 10)
 
+        self.prompt_sub = self.create_subscription(
+            String,
+            self.prompt_topic,
+            self._on_prompt,
+            10,
+        )
         self.image_sub = self.create_subscription(
             Image,
             self.process_pic_topic,
@@ -97,13 +109,40 @@ class VLMComplexityRouterNode(Node):
 
         self.get_logger().info(
             "vlm_complexity_router 启动: "
+            f"prompt_topic={self.prompt_topic}, "
             f"process_pic={self.process_pic_topic}, "
             f"simple_wp={self.simple_waypoint_topic}, complex_wp={self.complex_waypoint_topic}, "
             f"output_wp={self.output_waypoint_topic}, qwen_result={self.qwen_result_topic}, "
-            f"qwen_api={self.qwen_api_url}, timeout={self.qwen_timeout}s"
+            f"qwen_api={self.qwen_api_url}, timeout={self.qwen_timeout}s, "
+            f"qwen_min_interval={self.qwen_min_interval_sec}s"
+        )
+
+    def _on_prompt(self, msg: String):
+        prompt_text = (msg.data or "").strip()
+        if not prompt_text:
+            return
+
+        with self._lock:
+            self._pending_prompt_tokens += 1
+            pending = self._pending_prompt_tokens
+
+        self.get_logger().info(
+            f"收到远程prompt，允许触发Qwen一次，pending_tokens={pending}"
         )
 
     def image_callback(self, msg: Image):
+        now = time.monotonic()
+        with self._lock:
+            if self._pending_prompt_tokens <= 0:
+                return
+
+            elapsed = now - self._last_qwen_dispatch_at
+            if elapsed < self.qwen_min_interval_sec:
+                return
+
+            self._pending_prompt_tokens -= 1
+            self._last_qwen_dispatch_at = now
+
         request_id = msg.header.frame_id.strip() if msg.header.frame_id else ""
         if not request_id:
             request_id = self._build_request_id(msg)
@@ -119,7 +158,6 @@ class VLMComplexityRouterNode(Node):
             self.get_logger().warn(f"图像编码失败，跳过 request_id={request_id}")
             return
 
-        now = time.monotonic()
         state = RequestState(
             request_id=request_id,
             created_at=now,

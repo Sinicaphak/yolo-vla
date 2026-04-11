@@ -1,12 +1,13 @@
-# base
+# 使用同目录下bar.sh启动项目
 
-cd /home/apollo/disk/ros2/src
-pip install casadi
-sudo apt install ros-humble-osqp-vendor
-git clone https://github.com/agilexrobotics/ugv_sdk.git
-git clone https://github.com/agilexrobotics/hunter_ros2.git
-cd ..
-colcon build
+# clone后另外按照以下网址安装其他包
+https://github.com/orbbec/ros2_astra_camera
+https://github.com/agilexrobotics/hunter_ros2
+
+# omni依赖问题
+安装conda
+pip install -e .
+conda activate omnivla
 
 # 有关摄像头
 
@@ -19,6 +20,7 @@ nvgstcapture-1.0 --camsrc=0 --cap-dev-node=0
     cap-dev-node为dev编号
 
 ## 双目摄像头
+https://github.com/orbbec/ros2_astra_camera
 ros2 launch astra_camera astra_pro.launch.xml uvc_vendor_id:=0x2bc5 uvc_product_id:=0x050f serial_number:=ACR874300E4
 
 # gs_usb 驱动
@@ -35,8 +37,6 @@ pkill -f astra_camera &&
 pkill -f astra_camera_msg &&
 ros2 node list
 
-# omni依赖问题
-pip install -e .
-conda activate omnivla
+
 
 

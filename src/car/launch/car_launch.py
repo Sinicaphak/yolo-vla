@@ -220,11 +220,13 @@ def generate_launch_description():
         )
         launch_nodes.append(model_node)
     elif MODEL_TYPE == ModelType.OMNI_PARALLEL:
+        test_level = "error"
         vlm_complexity_router = Node(
             package='car',
             executable='vlm_complexity_router',
             name='vlm_complexity_router',
             parameters=[{
+                'prompt_topic': PROMPT_TOPIC,
                 'process_pic_topic': PROCESS_PIC_TOPIC,
                 'simple_waypoint_topic': LOCAL_COMMD_TOPIC,
                 'complex_waypoint_topic': REMOTE_COMMD_TOPIC,
@@ -237,7 +239,7 @@ def generate_launch_description():
                 'max_pending_frames': 2,
                 'request_ttl': 20.0,
             }],
-            arguments=['--ros-args', '--log-level', "error"],
+            arguments=['--ros-args', '--log-level', log_level],
         )
 
         omnivla_local = Node(
@@ -292,7 +294,7 @@ def generate_launch_description():
                 'goal_compass': GOAL_COMPASS,
                 'auto_start_prompt': 'go forward and turn right',
             }],
-            arguments=['--ros-args', '--log-level', log_level],
+            arguments=['--ros-args', '--log-level', test_level],
         )
 
         launch_nodes.extend([vlm_complexity_router, omnivla_local, omnivla_client])
