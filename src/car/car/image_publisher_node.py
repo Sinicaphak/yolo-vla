@@ -1,3 +1,5 @@
+import signal
+from rclpy.qos import qos_profile_sensor_data
 import subprocess
 from std_msgs.msg import Bool
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
@@ -35,6 +37,10 @@ class ImagePublisherNode(Node):
         timer_period = 1.0 / self.fps
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
+        self.astra_proc = None
+        self.latest_camera_msg = None
+        self.camera_sub = None
+
         self.bridge = CvBridge()
         self.cv_images = []
         self.image_files = []
@@ -44,10 +50,15 @@ class ImagePublisherNode(Node):
         if self.mode == 'local':
             self.load_images()
             self.get_logger().info(f'本地图片模式: 目录 {self.pic_dir}, {len(self.cv_images)} 张, {self.fps} FPS')
-        else:
-            self.init_camera()
+        elif self.mode == 'camera_signal':
+            self.init_camera_singal()
             self.get_logger().info(f'摄像头模式: 设备 {self.camera_device}, {self.fps} FPS')
-            
+        elif self.mode == 'camera_dual':
+            self.init_camera_dual()
+            self.get_logger().info(f'双摄像头模式: 设备 {self.camera_device}, {self.fps} FPS')
+        else:
+            self.get_logger().error(f'未知的模式: {self.mode}')
+
         self.model_ready = False
         ready_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -64,7 +75,7 @@ class ImagePublisherNode(Node):
         if self.model_ready:
             self.get_logger().info("收到模型就绪信号，开始发布图像")
 
-    def init_camera(self):
+    def init_camera_singal(self):
         self.cap = None
         for device in self.camera_devices:
             cap = cv2.VideoCapture(device)
@@ -80,6 +91,29 @@ class ImagePublisherNode(Node):
             rclpy.shutdown()
             os._exit(1)
             return
+        
+    def init_camera_dual(self):
+        # 启动 astra_camera
+        cmd = (
+            "ros2 launch astra_camera astra_pro.launch.xml "
+            "uvc_vendor_id:=0x2bc5 uvc_product_id:=0x050f serial_number:=ACR874300E4"
+        )
+        self.astra_proc = subprocess.Popen(
+            ["bash", "-lc", cmd],
+            preexec_fn=os.setsid,
+        )
+        self.get_logger().info("已启动 astra_camera 子进程")
+
+        # 订阅 astra 彩色图像
+        self.camera_sub = self.create_subscription(
+            Image,
+            "/camera/color/image_raw",
+            self._on_dual_camera_image,
+            qos_profile_sensor_data,
+        )
+        
+    def _on_dual_camera_image(self, msg: Image):
+        self.latest_camera_msg = msg
 
     def load_images(self):
         """从 self.pic_dir 加载所有图片文件。"""
@@ -133,18 +167,29 @@ class ImagePublisherNode(Node):
                 else:
                     self.get_logger().info(f'已发布完所有图片共{len(self.cv_images)}张，停止发布。')
                     self.timer.cancel()
-        else:
-            if self.cap is None or not self.cap.isOpened():
-                self.get_logger().warn('摄像头未打开，无法发布。', throttle_duration_sec=5)
-                rclpy.shutdown()
-                os._exit(1)
-                return
-            ret, frame = self.cap.read()
-            if not ret:
-                self.get_logger().warn('读取摄像头帧失败。', throttle_duration_sec=5)
-                return
-            self.publish_frame(frame, 'camera_frame')
-        
+            elif self.mode == 'camera_signal':
+                if self.cap is None or not self.cap.isOpened():
+                    self.get_logger().warn('摄像头未打开，无法发布。', throttle_duration_sec=5)
+                    return
+                ret, frame = self.cap.read()
+                if not ret:
+                    self.get_logger().warn('读取摄像头帧失败。', throttle_duration_sec=5)
+                    return
+                self.publish_frame(frame, 'camera_frame')
+            elif self.mode == 'camera_dual':
+                if self.latest_camera_msg is None:
+                    self.get_logger().warn('尚未收到 /camera/color/image_raw', throttle_duration_sec=5)
+                    return
+                msg = self.latest_camera_msg
+                msg.header.stamp = self.get_clock().now().to_msg()
+                self.publisher_.publish(msg)
+                
+    def destroy_node(self):
+        if self.cap is not None and self.cap.isOpened():
+            self.cap.release()
+        if self.astra_proc is not None and self.astra_proc.poll() is None:
+            os.killpg(os.getpgid(self.astra_proc.pid), signal.SIGTERM)
+        super().destroy_node()        
 
 def main(args=None):
     rclpy.init(args=args)
